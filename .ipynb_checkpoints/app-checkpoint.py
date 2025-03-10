@@ -1,85 +1,166 @@
 import streamlit as st
 import joblib
-import numpy as np
 import pandas as pd
-import plotly.express as px
+import numpy as np
 
-# Load the pretrained model (replace with your model's file path)
-model = joblib.load('global_model.pkl')
+# Set page config
+st.set_page_config(
+    page_title="Crop Yield Predictor",
+    page_icon="🌾",
+    layout="wide"
+)
 
-# Function to make predictions using the loaded model
-def predict_yield(form_data):
-    # Preparing the feature array based on user inputs
-    feature_array = np.array([
-        [
-            form_data["soilType"],  # This should be converted into numerical format
-            form_data["crop"],      # This should be converted into numerical format
-            form_data["rainfall"],
-            form_data["temperature"],
-            form_data["fertilizer"],
-            form_data["irrigation"],
-            form_data["weatherCondition"],
-            form_data["daysToHarvest"]
-        ]
-    ])
+# Load the model
+@st.cache_resource
+def load_model():
+    return joblib.load('global_model.pkl')
 
-    # Preprocess the feature array (you may need to apply encoding/normalization)
-    # If you're using categorical variables, they should be encoded first (e.g., using LabelEncoder)
+try:
+    global_coef, global_intercept = load_model()
+except:
+    st.error("Error: Could not load model file. Please ensure 'global_model.pkl' exists in the same directory.")
+    st.stop()
 
-    # Prediction using the model
-    prediction = model.predict(feature_array)  # Replace with your model's predict method
-    return prediction[0]
+# Mappings
+soil_type_mapping = {
+    'Sandy': 4,
+    'Clay': 1,
+    'Loam': 2,
+    'Silt': 5,
+    'Peaty': 3,
+    'Chalky': 0
+}
 
-# Streamlit app layout
-def main():
-    st.title("Agricultural Yield Predictor")
+crop_mapping = {
+    'Cotton': 1,
+    'Rice': 3,
+    'Barley': 0,
+    'Soybean': 4,
+    'Wheat': 5,
+    'Maize': 2
+}
 
-    # Input fields
-    soil_types = ["Loamy", "Clay", "Sandy", "Silt"]
-    crops = ["Wheat", "Rice", "Corn", "Soybean"]
-    weather_conditions = ["Sunny", "Cloudy", "Rainy", "Windy"]
+weather_condition_mapping = {
+    'Sunny': 2,
+    'Rainy': 1,
+    'Cloudy': 0
+}
 
-    form_data = {
-        "soilType": st.selectbox("Soil Type", soil_types, index=0),
-        "crop": st.selectbox("Crop", crops, index=0),
-        "rainfall": st.number_input("Rainfall (mm)", value=800),
-        "temperature": st.number_input("Temperature (°C)", value=25),
-        "fertilizer": st.checkbox("Fertilizer Used", value=True),
-        "irrigation": st.checkbox("Irrigation Used", value=True),
-        "weatherCondition": st.selectbox("Weather Condition", weather_conditions, index=0),
-        "daysToHarvest": st.number_input("Days to Harvest", value=120)
-    }
+def predict_crop_yield(input_data):
+    """
+    Make prediction using the loaded coefficients and intercept
+    """
+    # Convert input data to DataFrame
+    input_df = pd.DataFrame([input_data])
+    
+    # Apply mappings
+    input_df['Soil_Type'] = input_df['Soil_Type'].map(soil_type_mapping)
+    input_df['Crop'] = input_df['Crop'].map(crop_mapping)
+    input_df['Weather_Condition'] = input_df['Weather_Condition'].map(weather_condition_mapping)
+    input_df['Fertilizer_Used'] = input_df['Fertilizer_Used'].map({'Yes': 1, 'No': 0})
+    input_df['Irrigation_Used'] = input_df['Irrigation_Used'].map({'Yes': 1, 'No': 0})
+    
+    # Convert to numpy array
+    input_array = input_df.to_numpy().flatten()
+    
+    # Make prediction using dot product
+    prediction = np.dot(input_array, global_coef) + global_intercept
+    return float(prediction)
 
-    # Prediction button
-    if st.button("Predict Yield"):
-        # Get the prediction from the model
-        prediction = predict_yield(form_data)
-        st.write(f"Predicted Yield: {prediction:.2f} tons per hectare")
+# Main app
+st.title("🌾 Crop Yield Prediction System")
+st.write("Enter the following details to predict crop yield:")
 
-        # Mock data for charting (you should replace this with real prediction data)
-        predictions = {
-            "client1": prediction + 0.2,
-            "client2": prediction + 0.1,
-            "client3": prediction + 0.3,
-            "client4": prediction + 0.25,
-            "global": prediction
+# Create two columns for input fields
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Field Conditions")
+    soil_type = st.selectbox(
+        "Soil Type",
+        options=list(soil_type_mapping.keys())
+    )
+    
+    rainfall = st.number_input(
+        "Rainfall (mm)",
+        min_value=0.0,
+        max_value=5000.0,
+        value=100.0
+    )
+    
+    temperature = st.number_input(
+        "Temperature (°C)",
+        min_value=-20.0,
+        max_value=50.0,
+        value=25.0
+    )
+    
+    weather = st.selectbox(
+        "Weather Condition",
+        options=list(weather_condition_mapping.keys())
+    )
+
+with col2:
+    st.subheader("Crop Information")
+    crop = st.selectbox(
+        "Crop Type",
+        options=list(crop_mapping.keys())
+    )
+    
+    days_to_harvest = st.number_input(
+        "Days to Harvest",
+        min_value=1,
+        max_value=365,
+        value=90
+    )
+    
+    fertilizer = st.radio(
+        "Fertilizer Used",
+        options=["Yes", "No"]
+    )
+    
+    irrigation = st.radio(
+        "Irrigation Used",
+        options=["Yes", "No"]
+    )
+
+# Prediction button
+if st.button("Predict Yield", type="primary"):
+    try:
+        input_data = {
+            'Soil_Type': soil_type,
+            'Crop': crop,
+            'Rainfall_mm': rainfall,
+            'Temperature_Celsius': temperature,
+            'Fertilizer_Used': fertilizer,
+            'Irrigation_Used': irrigation,
+            'Weather_Condition': weather,
+            'Days_to_Harvest': days_to_harvest
         }
+        
+        prediction = predict_crop_yield(input_data)
+        
+        st.success(f"Predicted Crop Yield: {prediction:.2f}")
+        
+        # Additional information
+        st.info("Prediction Details:")
+        col3, col4, col5 = st.columns(3)
+        
+        with col3:
+            st.metric("Soil Type", soil_type)
+            st.metric("Rainfall", f"{rainfall} mm")
+        
+        with col4:
+            st.metric("Crop Type", crop)
+            st.metric("Temperature", f"{temperature}°C")
+        
+        with col5:
+            st.metric("Days to Harvest", days_to_harvest)
+            st.metric("Weather", weather)
+            
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
 
-        # Prepare data for chart
-        chart_data = pd.DataFrame({
-            "Client": ["Client 1", "Client 2", "Client 3", "Client 4", "Global"],
-            "Yield": [
-                predictions["client1"], 
-                predictions["client2"], 
-                predictions["client3"], 
-                predictions["client4"], 
-                predictions["global"]
-            ]
-        })
-
-        # Plot bar chart using Plotly
-        fig = px.bar(chart_data, x="Client", y="Yield", title="Predicted Agricultural Yield")
-        st.plotly_chart(fig)
-
-if __name__ == "__main__":
-    main()
+# Add footnote
+st.markdown("---")
+st.caption("Note: This is a prediction model based on historical data. Actual yields may vary based on additional factors.")

@@ -1,65 +1,115 @@
-import requests
-import numpy as np
-import json
-from pathlib import Path
-import joblib
+import streamlit as st
+import os
+import git
+import logging
+from typing import List
+import tempfile
+import shutil
 
-class ModelClient:
-    def __init__(self, client_id, server_url="http://localhost:5000"):
-        self.client_id = client_id
-        self.server_url = server_url
-        self.model_path = None
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def upload_parameters(repo_dir: str, repo_url: str, files: List[str]):
+    """Upload model parameters to GitHub repository"""
+    try:
+        # Initialize repository
+        repo = git.Repo.init(repo_dir)
         
-    def fetch_model(self):
-        """Fetch model from server"""
-        response = requests.get(f"{self.server_url}/get_model/{self.client_id}")
-        result = response.json()
-        
-        if result['status'] == 'success':
-            self.model_path = result['model_path']
-            print(f"Model successfully downloaded to {self.model_path}")
-            return True
+        # Add remote
+        if 'origin' not in [remote.name for remote in repo.remotes]:
+            origin = repo.create_remote('origin', repo_url)
         else:
-            print(f"Error fetching model: {result.get('error')}")
-            return False
+            origin = repo.remote('origin')
             
-    def verify_model(self):
-        """Verify model integrity"""
-        response = requests.get(f"{self.server_url}/verify_model/{self.client_id}")
-        result = response.json()
+        # Add files
+        repo.index.add(files)
         
-        if result.get('verified'):
-            print("Model verification successful!")
-        else:
-            print(f"Model verification failed: {result.get('error')}")
+        # Commit changes
+        commit_message = "Upload model parameters"
+        repo.index.commit(commit_message)
         
-        return result
-    
-    def predict(self, features):
-        """Make predictions using the model"""
-        data = {
-            'features': features.tolist() if isinstance(features, np.ndarray) else features,
-            'client_id': self.client_id
-        }
+        # Push to GitHub
+        origin.push('master')
+        return True, "Successfully uploaded parameters to GitHub"
         
-        response = requests.post(f"{self.server_url}/predict", json=data)
-        result = response.json()
-        
-        if result['status'] == 'success':
-            return np.array(result['prediction'])
-        else:
-            raise Exception(f"Prediction failed: {result.get('error')}")
+    except Exception as e:
+        return False, f"Error in uploading parameters: {e}"
 
-# Example usage
+def main():
+    st.set_page_config(page_title="Federated Learning - Client Upload", layout="wide")
+    
+    st.title("Federated Learning - Client Parameter Upload")
+    st.markdown("---")
+
+    # GitHub Repository Configuration
+    st.header("GitHub Repository Configuration")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        repo_url = st.text_input(
+            "GitHub Repository URL",
+            placeholder="https://github.com/username/repository",
+            help="Enter the URL of your GitHub repository"
+        )
+
+    # File Upload Section
+    st.header("Parameter Files Upload")
+    st.markdown("Upload your model parameter files (*.npy files)")
+    
+    uploaded_files = st.file_uploader(
+        "Choose parameter files",
+        type=['npy'],
+        accept_multiple_files=True,
+        help="Select coefficient and intercept files"
+    )
+
+    if st.button("Upload to GitHub", type="primary"):
+        if not repo_url:
+            st.error("Please enter GitHub repository URL")
+            return
+            
+        if not uploaded_files:
+            st.error("Please upload parameter files")
+            return
+
+        # Create temporary directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Save uploaded files
+            saved_files = []
+            for uploaded_file in uploaded_files:
+                file_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(file_path, 'wb') as f:
+                    f.write(uploaded_file.getvalue())
+                saved_files.append(uploaded_file.name)
+
+            with st.spinner("Uploading parameters to GitHub..."):
+                success, message = upload_parameters(temp_dir, repo_url, saved_files)
+                
+                if success:
+                    st.success(message)
+                    st.balloons()
+                else:
+                    st.error(message)
+
+    # Display instructions
+    with st.expander("Instructions"):
+        st.markdown("""
+        ### How to use this uploader:
+        1. Enter your GitHub repository URL
+        2. Upload your parameter files (coefficient and intercept .npy files)
+        3. Click 'Upload to GitHub' to start the upload process
+        
+        ### Required Files:
+        - Coefficient files (coef_client_X.npy)
+        - Intercept files (intercept_client_X.npy)
+        
+        ### Note:
+        Make sure you have the correct GitHub permissions to push to the repository.
+        """)
+
 if __name__ == "__main__":
-    # Initialize client
-    client = ModelClient(client_id=1)
-    
-    # Fetch and verify model
-    client.fetch_model()
-    client.verify_model()
-    
-    # Make predictions
-    sample_features = np.array([1, 2, 3, 4, 5,6,7,8,9])  # Adjust based on your feature dimensions
-    prediction = client.predict(sample_features)
-    print(f"Prediction: {prediction}")
+    main()
